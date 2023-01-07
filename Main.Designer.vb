@@ -108,6 +108,7 @@ Partial Class Main
         Me.ToolTip1 = New System.Windows.Forms.ToolTip(Me.components)
         Me.OpenFileDialog1 = New System.Windows.Forms.OpenFileDialog()
         Me.btnAndorville = New System.Windows.Forms.Button()
+        Me.Timer4 = New System.Windows.Forms.Timer(Me.components)
         Me.TabControl1.SuspendLayout()
         Me.TabPage3.SuspendLayout()
         Me.TabPage1.SuspendLayout()
@@ -1024,4 +1025,5 @@ Partial Class Main
     Friend WithEvents txtDegreeDecPlaces As TextBox
     Friend WithEvents Label205 As Label
     Friend WithEvents lblMatch As Label
+    Friend WithEvents Timer4 As Timer
 End Class

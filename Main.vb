@@ -18,10 +18,12 @@
 
 Imports System.ComponentModel
 Imports System.Security.Permissions
+Imports System.Threading
+
 <PermissionSet(SecurityAction.Demand, Name:="FullTrust")>
 <System.Runtime.InteropServices.ComVisibleAttribute(True)> 'Note: There should be no blank lines between this line and the line: Public Class Main
 Public Class Main
-    'The ADVL_Coordinates_2 application converts coordinates between different location systems.
+    'The ADVL_Coordinates_2 application converts coordinate values between different coordinate reference systems.
 
 
 
@@ -272,6 +274,11 @@ Public Class Main
     Public WithEvents CoordOpMethodsForm As frmCoordOpMethods 'Coordinate Operation Methods form.
 
     Dim WithEvents Angle As New clsAngle
+
+    Dim GetCRSListInfo As New clsGetCRSListInfo 'Settings used to get a list of coordinate reference systems
+
+    Public CoordServer As clsCoordTransformation 'Coordinates Server - used to perform coordinates calculations for client applications.
+    Dim CoordIndex As Integer 'Temporary storage of an index value - used during coordinate conversion of indexed locations
 
 
 #End Region 'Variable Declarations ------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -582,7 +589,7 @@ Public Class Main
 
 
             CheckFormPos()
-            End If
+        End If
     End Sub
 
     Private Sub CheckFormPos()
@@ -637,7 +644,7 @@ Public Class Main
         'ApplicationInfo.ApplicationDir is set when the application is started.
         ApplicationInfo.ExecutablePath = Application.ExecutablePath
 
-        ApplicationInfo.Description = "The Coordinates application converts coordinates between different location systems."
+        ApplicationInfo.Description = "The ADVL_Coordinates_2 application converts coordinate values between different coordinate reference systems."
         ApplicationInfo.CreationDate = "18-Oct-2022 12:00:00"
 
         'Author -----------------------------------------------------------------------------------------------------------
@@ -748,7 +755,7 @@ Public Class Main
         'Source Code: --------------------------------------------------------------------------------------------------
         'Add your source code information here if required.
         'THIS SECTION WILL BE UPDATED TO ALLOW A GITHUB LINK.
-        ApplicationInfo.SourceCode.Language = "Visual Basic 2019"
+        ApplicationInfo.SourceCode.Language = "Visual Basic 2022"
         ApplicationInfo.SourceCode.FileName = ""
         ApplicationInfo.SourceCode.FileSize = 0
         ApplicationInfo.SourceCode.FileHash = ""
@@ -998,7 +1005,7 @@ Public Class Main
         Me.Show() 'Show this form before showing the Message form - This will show the App icon on top in the TaskBar.
 
         'Start showing messages here - Message system is set up.
-        Message.AddText("------------------- Starting Application: ADVL Application Template ----------------- " & vbCrLf, "Heading")
+        Message.AddText("------------------- Starting Application: ADVL Coordinates 2 ----------------- " & vbCrLf, "Heading")
         'Message.AddText("Application usage: Total duration = " & Format(ApplicationUsage.TotalDuration.TotalHours, "#.##") & " hours" & vbCrLf, "Normal")
         Dim TotalDuration As String = ApplicationUsage.TotalDuration.Days.ToString.PadLeft(5, "0"c) & "d:" &
                            ApplicationUsage.TotalDuration.Hours.ToString.PadLeft(2, "0"c) & "h:" &
@@ -1855,7 +1862,7 @@ Public Class Main
 
         sb.Append("<h2>" & "Andorville&trade; Coordinates 2" & "</h2>" & vbCrLf & vbCrLf) 'Add the page title.
         sb.Append("<hr>" & vbCrLf) 'Add a horizontal divider line.
-        sb.Append("<p>The Coordinates 2 application converts coordinates between different location systems.</p>" & vbCrLf) 'Add an application description.
+        sb.Append("<p>The ADVL_Coordinates_2 application converts coordinate values between different coordinate reference systems.</p>" & vbCrLf) 'Add an application description.
         sb.Append("<hr>" & vbCrLf & vbCrLf) 'Add a horizontal divider line.
 
         sb.Append(DefaultJavaScriptString)
@@ -4103,6 +4110,1184 @@ Public Class Main
 
     End Sub
 
+    Private Sub GetGeographicCrsList()
+        'Generate an XMessage containing a list of Geographic Coordinate Reference Systems.
+        'The settings used to generate this list are stored in GetCRSListInfo.
+
+        If EpsgDatabasePath = "" Then
+            Message.AddWarning("No EPSG database has been selected." & vbCrLf)
+            Exit Sub
+        End If
+
+        If Not System.IO.File.Exists(EpsgDatabasePath) Then
+            Message.AddWarning("Selected EPSG database can not be found." & vbCrLf)
+            Exit Sub
+        End If
+
+        'Database access for MS Access:
+        Dim connectionString As String 'Declare a connection string for MS Access - defines the database or server to be used.
+        Dim conn As System.Data.OleDb.OleDbConnection 'Declare a connection for MS Access - used by the Data Adapter to connect to and disconnect from the database.
+
+        'Access 2007:
+        connectionString = "provider=Microsoft.ACE.OLEDB.12.0;" +
+        "data source = " + EpsgDatabasePath
+
+        'Connect to the Access database:
+        conn = New System.Data.OleDb.OleDbConnection(connectionString)
+        conn.Open()
+
+        Dim CrsSearch As DataSet = New DataSet
+
+        If GetCRSListInfo.GetGeographic2D = True Then
+            Dim List As New XElement("Geographic2DCrsList")
+
+            'https://learnsql.com/blog/how-to-join-3-tables-Or-more-in-sql/
+            'https://www.w3schools.com/sql/sql_join.asp
+            'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE FROM ([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE)" 'THIS WORKS ****************************
+            'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE FROM ([Coordinate Reference System], [Usage] WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE)" 'DOES NOT WORK
+            'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE)" 'THIS WORKS ****************************
+            'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT FROM ([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE" 'THIS WORKS ****************************
+            Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'geographic 2D'"
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Dim crsName As New XElement("Geographic2DCrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        List.Add(crsName)
+                    Next
+                    'xmessage.Add(List)
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                Dim crsName As New XElement("Geographic2DCrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                List.Add(crsName)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                    'xmessage.Add(List)
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            Dim crsName As New XElement("Geographic2DCrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            List.Add(crsName)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+                xlocns(xlocns.Count - 1).Add(List)
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+
+        End If
+    End Sub
+
+    Private Sub GetProjectedCrsList()
+        'Generate an XMessage containing a list of Projected Coordinate Reference Systems.
+        'The settings used to generate this list are stored in GetCRSListInfo.
+
+        If EpsgDatabasePath = "" Then
+            Message.AddWarning("No EPSG database has been selected." & vbCrLf)
+            Exit Sub
+        End If
+
+        If Not System.IO.File.Exists(EpsgDatabasePath) Then
+            Message.AddWarning("Selected EPSG database can not be found." & vbCrLf)
+            Exit Sub
+        End If
+
+        'Database access for MS Access:
+        Dim connectionString As String 'Declare a connection string for MS Access - defines the database or server to be used.
+        Dim conn As System.Data.OleDb.OleDbConnection 'Declare a connection for MS Access - used by the Data Adapter to connect to and disconnect from the database.
+
+        'Access 2007:
+        connectionString = "provider=Microsoft.ACE.OLEDB.12.0;" +
+        "data source = " + EpsgDatabasePath
+
+        'Connect to the Access database:
+        conn = New System.Data.OleDb.OleDbConnection(connectionString)
+        conn.Open()
+
+        Dim CrsSearch As DataSet = New DataSet
+
+        'If GetCRSListInfo.GetGeographic2D = True Then
+        Dim List As New XElement("ProjectedCrsList")
+
+        'https://learnsql.com/blog/how-to-join-3-tables-Or-more-in-sql/
+        'https://www.w3schools.com/sql/sql_join.asp
+        'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE FROM ([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE)" 'THIS WORKS ****************************
+        'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE FROM ([Coordinate Reference System], [Usage] WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE)" 'DOES NOT WORK
+        'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE)" 'THIS WORKS ****************************
+        'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT FROM ([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE" 'THIS WORKS ****************************
+        Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'projected'"
+
+        Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+        Try
+            da.Fill(CrsSearch, "List")
+            If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                    Dim crsName As New XElement("ProjectedCrsName", Row.Item("COORD_REF_SYS_NAME"))
+                    List.Add(crsName)
+                Next
+                'xmessage.Add(List)
+            ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                Dim IncludeCrs As Boolean
+                For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                    Try
+                        IncludeCrs = True
+                        If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                        If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                        If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                        If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                        If IncludeCrs Then
+                            Dim crsName As New XElement("ProjectedCrsName", Row.Item("COORD_REF_SYS_NAME"))
+                            List.Add(crsName)
+                        End If
+                    Catch ex As Exception
+                        Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                        Message.AddWarning(ex.Message & vbCrLf)
+                    End Try
+                Next
+                'xmessage.Add(List)
+            ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                    Try
+                        If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                    If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                        Dim crsName As New XElement("ProjectedCrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                        List.Add(crsName)
+                                    End If
+                                End If
+                            End If
+                        End If
+                    Catch ex As Exception
+                        Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                        Message.AddWarning(ex.Message & vbCrLf)
+                    End Try
+                Next
+            End If
+            xlocns(xlocns.Count - 1).Add(List)
+        Catch ex As Exception
+            Message.AddWarning(ex.Message & vbCrLf)
+        End Try
+
+        'End If
+
+
+    End Sub
+
+    Private Sub StartCoordServer()
+        'Start the Coordinates Server
+        If IsNothing(CoordServer) Then
+            CoordServer = New clsCoordTransformation
+            CoordServer.EpsgDatabasePath = EpsgDatabasePath
+        End If
+    End Sub
+
+    Private Sub GetCrsList()
+        'Generate an XMessage containing a list of Coordinate Reference Systems.
+        'The settings used to generate this list are stored in GetCRSListInfo.
+
+        If EpsgDatabasePath = "" Then
+            Message.AddWarning("No EPSG database has been selected." & vbCrLf)
+            Exit Sub
+        End If
+
+        If Not System.IO.File.Exists(EpsgDatabasePath) Then
+            Message.AddWarning("Selected EPSG database can not be found." & vbCrLf)
+            Exit Sub
+        End If
+
+        'Database access for MS Access:
+        Dim connectionString As String 'Declare a connection string for MS Access - defines the database or server to be used.
+        Dim conn As System.Data.OleDb.OleDbConnection 'Declare a connection for MS Access - used by the Data Adapter to connect to and disconnect from the database.
+
+        'Access 2007:
+        connectionString = "provider=Microsoft.ACE.OLEDB.12.0;" +
+        "data source = " + EpsgDatabasePath
+
+        'Connect to the Access database:
+        conn = New System.Data.OleDb.OleDbConnection(connectionString)
+        conn.Open()
+
+        Dim CrsSearch As DataSet = New DataSet
+        Dim Query As String
+
+        Dim List As New XElement("CrsList")
+
+        If GetCRSListInfo.GetProjected Then
+            'https://learnsql.com/blog/how-to-join-3-tables-Or-more-in-sql/
+            'https://www.w3schools.com/sql/sql_join.asp
+            'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE FROM ([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE)" 'THIS WORKS ****************************
+            'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE)" 'THIS WORKS ****************************
+            'Dim Query As String = "SELECT [Coordinate Reference System].COORD_REF_SYS_NAME, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT FROM ([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE" 'THIS WORKS ****************************
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'projected' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE, [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'projected'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("ProjectedCrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        List.Add(crsName)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+        If GetCRSListInfo.GetGeographic2D Then
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'geographic 2D' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'geographic 2D'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                If CrsSearch.Tables.Contains("List") Then CrsSearch.Tables("List").Rows.Clear()
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        'List.Add(crsName)
+                        Dim Crs As New XElement("Crs")
+                        Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                        Crs.Add(Name)
+                        Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                        Crs.Add(Code)
+                        Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                        Crs.Add(Kind)
+                        List.Add(Crs)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+        If GetCRSListInfo.GetGeographic3D Then
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'geographic 3D' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'geographic 3D'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                If CrsSearch.Tables.Contains("List") Then CrsSearch.Tables("List").Rows.Clear()
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        'List.Add(crsName)
+                        Dim Crs As New XElement("Crs")
+                        Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                        Crs.Add(Name)
+                        Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                        Crs.Add(Code)
+                        Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                        Crs.Add(Kind)
+                        List.Add(Crs)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+        If GetCRSListInfo.GetCompound Then
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'compound' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'compound'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                If CrsSearch.Tables.Contains("List") Then CrsSearch.Tables("List").Rows.Clear()
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        'List.Add(crsName)
+                        Dim Crs As New XElement("Crs")
+                        Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                        Crs.Add(Name)
+                        Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                        Crs.Add(Code)
+                        Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                        Crs.Add(Kind)
+                        List.Add(Crs)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+        If GetCRSListInfo.GetDerived Then
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'derived' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'derived'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                If CrsSearch.Tables.Contains("List") Then CrsSearch.Tables("List").Rows.Clear()
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        'List.Add(crsName)
+                        Dim Crs As New XElement("Crs")
+                        Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                        Crs.Add(Name)
+                        Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                        Crs.Add(Code)
+                        Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                        Crs.Add(Kind)
+                        List.Add(Crs)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+        If GetCRSListInfo.GetEngineering Then
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'engineering' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'engineering'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                If CrsSearch.Tables.Contains("List") Then CrsSearch.Tables("List").Rows.Clear()
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        'List.Add(crsName)
+                        Dim Crs As New XElement("Crs")
+                        Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                        Crs.Add(Name)
+                        Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                        Crs.Add(Code)
+                        Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                        Crs.Add(Kind)
+                        List.Add(Crs)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)'
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+        If GetCRSListInfo.GetGeocentric Then
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'geocentric' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'geocentric'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                If CrsSearch.Tables.Contains("List") Then CrsSearch.Tables("List").Rows.Clear()
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        'List.Add(crsName)
+                        Dim Crs As New XElement("Crs")
+                        Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                        Crs.Add(Name)
+                        Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                        Crs.Add(Code)
+                        Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                        Crs.Add(Kind)
+                        List.Add(Crs)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+        If GetCRSListInfo.GetVertical Then
+            If GetCRSListInfo.UseCrsNameContains Then
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'vertical' AND [Coordinate Reference System].COORD_REF_SYS_NAME LIKE '%" & GetCRSListInfo.CrsNameContains & "%'"
+            Else
+                Query = "SELECT [Coordinate Reference System].COORD_REF_SYS_CODE,  [Coordinate Reference System].COORD_REF_SYS_NAME, [Coordinate Reference System].COORD_REF_SYS_KIND, [Usage].EXTENT_CODE, [Extent].BBOX_SOUTH_BOUND_LAT, [Extent].BBOX_WEST_BOUND_LON, [Extent].BBOX_NORTH_BOUND_LAT, [Extent].BBOX_EAST_BOUND_LON FROM (([Coordinate Reference System] LEFT JOIN [Usage] On [Coordinate Reference System].COORD_REF_SYS_CODE = [Usage].OBJECT_CODE) LEFT JOIN [Extent] On [Usage].EXTENT_CODE = [Extent].EXTENT_CODE) WHERE [Usage].OBJECT_TABLE_NAME = 'Coordinate Reference System' AND [Coordinate Reference System].COORD_REF_SYS_KIND = 'vertical'"
+            End If
+
+            Dim da As OleDb.OleDbDataAdapter = New OleDb.OleDbDataAdapter(Query, conn)
+            Try
+                If CrsSearch.Tables.Contains("List") Then CrsSearch.Tables("List").Rows.Clear()
+                da.Fill(CrsSearch, "List")
+                If GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                        'List.Add(crsName)
+                        Dim Crs As New XElement("Crs")
+                        Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                        Crs.Add(Name)
+                        Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                        Crs.Add(Code)
+                        Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                        Crs.Add(Kind)
+                        List.Add(Crs)
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea Then
+                    Dim IncludeCrs As Boolean
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            IncludeCrs = True
+                            If Row.Item("BBOX_SOUTH_BOUND_LAT") > GetCRSListInfo.NorthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") > GetCRSListInfo.SouthLat Then IncludeCrs = False
+                            If Row.Item("BBOX_WEST_BOUND_LON") > GetCRSListInfo.EastLong Then IncludeCrs = False
+                            If Row.Item("BBOX_EAST_BOUND_LON") > GetCRSListInfo.WestLong Then IncludeCrs = False
+                            If IncludeCrs Then
+                                'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                'List.Add(crsName)
+                                Dim Crs As New XElement("Crs")
+                                Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                Crs.Add(Name)
+                                Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                Crs.Add(Code)
+                                Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                Crs.Add(Kind)
+                                List.Add(Crs)
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") <= GetCRSListInfo.NorthLat Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") >= GetCRSListInfo.SouthLat Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") >= GetCRSListInfo.WestLong Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") <= GetCRSListInfo.EastLong Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                ElseIf GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint Then
+                    For Each Row As DataRow In CrsSearch.Tables("List").Rows
+                        Try
+                            If Row.Item("BBOX_NORTH_BOUND_LAT") >= GetCRSListInfo.ReferenceLatitude Then
+                                If Row.Item("BBOX_SOUTH_BOUND_LAT") <= GetCRSListInfo.ReferenceLatitude Then
+                                    If Row.Item("BBOX_WEST_BOUND_LON") <= GetCRSListInfo.ReferenceLongitude Then
+                                        If Row.Item("BBOX_EAST_BOUND_LON") >= GetCRSListInfo.ReferenceLongitude Then
+                                            'Dim crsName As New XElement("CrsName", Row.Item("COORD_REF_SYS_NAME"))
+                                            'List.Add(crsName)
+                                            Dim Crs As New XElement("Crs")
+                                            Dim Name As New XElement("Name", Row.Item("COORD_REF_SYS_NAME"))
+                                            Crs.Add(Name)
+                                            Dim Code As New XElement("Code", Row.Item("COORD_REF_SYS_CODE"))
+                                            Crs.Add(Code)
+                                            Dim Kind As New XElement("Kind", Row.Item("COORD_REF_SYS_KIND"))
+                                            Crs.Add(Kind)
+                                            List.Add(Crs)
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Catch ex As Exception
+                            Message.AddWarning("Error processing CRS: " & Row.Item("COORD_REF_SYS_NAME") & vbCrLf)
+                            Message.AddWarning(ex.Message & vbCrLf)
+                        End Try
+                    Next
+                End If
+            Catch ex As Exception
+                Message.AddWarning(ex.Message & vbCrLf)
+            End Try
+        End If
+
+
+        xlocns(xlocns.Count - 1).Add(List)
+    End Sub
+
+    Private Sub GetDirect7ParamDatumTransList()
+        'Generate an XMessage containing a list of Direct 7 parameter datum transformation operations.
+        'All possible direct datum transformation operations are stored in CoordServer in DirectDatumTransOpList:
+        '  Public DirectDatumTransOpList As New List(Of DatumTransOp) 'List of Coordinate Operations that can perform a direct Datum Transformation from the Input Datum to the Output Datum.
+
+        Dim List As New XElement("Direct7ParamDatumTransList")
+
+        For Each Item In CoordServer.DirectDatumTransOpList
+            If Item.MethodCode = 9607 Then 'This is a 7 parameter datum transformation.
+                If Item.Deprecated = False Then 'This datum transformation operation has not been deprecated.
+                    Dim DatumTrans As New XElement("DatumTrans")
+                    Dim Name As New XElement("Name", Item.Name)
+                    DatumTrans.Add(Name)
+                    Dim Code As New XElement("Code", Item.Code)
+                    DatumTrans.Add(Code)
+                    Dim Accuracy As New XElement("Accuracy", Item.Accuracy)
+                    DatumTrans.Add(Accuracy)
+                    Dim Reversible As New XElement("Reversible", Item.Reversible)
+                    DatumTrans.Add(Reversible)
+                    Dim ApplyReverse As New XElement("ApplyReverse", Item.ApplyReverse)
+                    DatumTrans.Add(ApplyReverse)
+                    List.Add(DatumTrans)
+                End If
+            End If
+        Next
+        xlocns(xlocns.Count - 1).Add(List)
+    End Sub
+
+    Private Sub GetInputToWgs84_7ParamDatumTransList()
+        'Generate an XMessage containing a list of Input to WGS 84 7 parameter datum transformation operations.
+        'All possible direct datum transformation operations are stored in CoordServer in InputToWgs84DatumTransOpList:
+        '  Public InputToWgs84TransOpList As New List(Of DatumTransOp) 'List of Coordinate Operations that can perform a Datum Transformation from the Input Datum to the WGS 84 Datum.
+
+        Dim List As New XElement("InputToWgs84_7ParamDatumTransList")
+
+        For Each Item In CoordServer.InputToWgs84TransOpList
+            If Item.MethodCode = 9607 Then 'This is a 7 parameter datum transformation.
+                If Item.Deprecated = False Then 'This datum transformation operation has not been deprecated.
+                    Dim DatumTrans As New XElement("DatumTrans")
+                    Dim Name As New XElement("Name", Item.Name)
+                    DatumTrans.Add(Name)
+                    Dim Code As New XElement("Code", Item.Code)
+                    DatumTrans.Add(Code)
+                    Dim Accuracy As New XElement("Accuracy", Item.Accuracy)
+                    DatumTrans.Add(Accuracy)
+                    Dim Reversible As New XElement("Reversible", Item.Reversible)
+                    DatumTrans.Add(Reversible)
+                    Dim ApplyReverse As New XElement("ApplyReverse", Item.ApplyReverse)
+                    DatumTrans.Add(ApplyReverse)
+                    List.Add(DatumTrans)
+                End If
+            End If
+        Next
+        xlocns(xlocns.Count - 1).Add(List)
+    End Sub
+
+    Private Sub GetWgs84ToOutput_7ParamDatumTransList()
+        'Generate an XMessage containing a list of WGS 84 to Output 7 parameter datum transformation operations.
+        'All possible direct datum transformation operations are stored in CoordServer in Wgs84ToOutputDatumTransOpList:
+        '  Public OutputFromWgs84TransOpList As New List(Of DatumTransOp) 'List of Coordinate Operations that can ferform a Datum Transformation from the WGS 84 Datum to the Output Datum.
+
+        Dim List As New XElement("Wgs84ToOutput_7ParamDatumTransList")
+
+        For Each Item In CoordServer.OutputFromWgs84TransOpList
+            If Item.MethodCode = 9607 Then 'This is a 7 parameter datum transformation.
+                If Item.Deprecated = False Then 'This datum transformation operation has not been deprecated.
+                    Dim DatumTrans As New XElement("DatumTrans")
+                    Dim Name As New XElement("Name", Item.Name)
+                    DatumTrans.Add(Name)
+                    Dim Code As New XElement("Code", Item.Code)
+                    DatumTrans.Add(Code)
+                    Dim Accuracy As New XElement("Accuracy", Item.Accuracy)
+                    DatumTrans.Add(Accuracy)
+                    Dim Reversible As New XElement("Reversible", Item.Reversible)
+                    DatumTrans.Add(Reversible)
+                    Dim ApplyReverse As New XElement("ApplyReverse", Item.ApplyReverse)
+                    DatumTrans.Add(ApplyReverse)
+                    List.Add(DatumTrans)
+                End If
+            End If
+        Next
+        xlocns(xlocns.Count - 1).Add(List)
+    End Sub
+
 
 #Region " Process XMessages" '===========================================================================================================================================
 
@@ -4201,7 +5386,451 @@ Public Class Main
                             Dim clientConnectionName As New XElement("ClientConnectionName", ConnectionName)
                             xlocns(xlocns.Count - 1).Add(clientConnectionName)
                             '<Status>OK</Status> will be automatically appended to the XMessage before it is sent.
+
+                        Case "Close"
+                            'NOTE: The following does not work:
+                            'Me.btnExit.PerformClick() 'Press the Exit button
+
+                            'Use Timer4 to delay the click:
+                            Timer4.Interval = 100 '100ms delay
+                            Timer4.Enabled = True 'Start the timer
+
                     End Select
+
+
+
+
+
+
+               'Process instructions used to get a list of geographic coordinate reference systems: ------------------------------------------------------------
+                Case "GetCRSList:SelectMethod"
+                    Select Case Data
+                        Case "All"
+                            GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.All
+                        Case "ExtendingInto"
+                            GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ExtendingIntoArea
+                        Case "Inside"
+                            GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.InsideArea
+                        Case "ContainingPoint"
+                            GetCRSListInfo.SelectMethod = clsGetCRSListInfo.SelectMethods.ContainingPoint
+                    End Select
+
+                Case "GetCRSList:NorthLatitude"
+                    GetCRSListInfo.NorthLat = Data
+                Case "GetCRSList:SouthLatitude"
+                    GetCRSListInfo.SouthLat = Data
+                Case "GetCRSList:WestLongitude"
+                    GetCRSListInfo.WestLong = Data
+                Case "GetCRSList:EastLongitude"
+                    GetCRSListInfo.EastLong = Data
+
+                Case "GetCRSList:ReferenceLongitude"
+                    GetCRSListInfo.ReferenceLongitude = Data
+                Case "GetCRSList:ReferenceLatitude"
+                    GetCRSListInfo.ReferenceLatitude = Data
+
+                Case "GetCRSList:UseCrsNameContains"
+                    If Data = "true" Then
+                        GetCRSListInfo.UseCrsNameContains = True
+                    Else
+                        GetCRSListInfo.UseCrsNameContains = False
+                    End If
+
+                Case "GetCRSList:CrsNameContains"
+                    GetCRSListInfo.CrsNameContains = Data
+
+                Case "GetCRSList:GetProjected"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetProjected = True
+                    Else
+                        GetCRSListInfo.GetProjected = False
+                    End If
+
+                Case "GetCRSList:GetGeographic2D"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetGeographic2D = True
+                    Else
+                        GetCRSListInfo.GetGeographic2D = False
+                    End If
+
+                Case "GetCRSList:GetGeographic3D"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetGeographic3D = True
+                    Else
+                        GetCRSListInfo.GetGeographic3D = False
+                    End If
+
+                Case "GetCRSList:GetCompound"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetCompound = True
+                    Else
+                        GetCRSListInfo.GetCompound = False
+                    End If
+
+                Case "GetCRSList:GetDerived"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetDerived = True
+                    Else
+                        GetCRSListInfo.GetDerived = False
+                    End If
+
+                Case "GetCRSList:GetEngineering"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetEngineering = True
+                    Else
+                        GetCRSListInfo.GetEngineering = False
+                    End If
+
+                Case "GetCRSList:GetGeocentric"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetGeocentric = True
+                    Else
+                        GetCRSListInfo.GetGeocentric = False
+                    End If
+
+                Case "GetCRSList:GetVertical"
+                    If Data = "true" Then
+                        GetCRSListInfo.GetVertical = True
+                    Else
+                        GetCRSListInfo.GetVertical = False
+                    End If
+
+                Case "GetCRSList:Command"
+                    If Data = "OK" Then
+                        GetCrsList()
+                    End If
+
+               'Process instructions used to set the coordinate conversion parameters: ------------------------------------------------------------
+                Case "SetInputCrsCode" 'Set the Input CRS Code
+                    'If IsNothing(CoordServer) Then CoordServer = New clsCoordTransformation
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.InputCrs.Code = Data
+                    CoordServer.InputCrs.GetAllSourceTargetCoordOps()
+
+                Case "SetOutputCrsCode" 'Set the Output CRS Code
+                    'If IsNothing(CoordServer) Then CoordServer = New clsCoordTransformation
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.OutputCrs.Code = Data
+                    CoordServer.OutputCrs.GetAllSourceTargetCoordOps()
+
+                Case "SetDatumTransType" 'Set the Datum Transformation Type (None, Direct, ViaWgs84)
+                    'If IsNothing(CoordServer) Then CoordServer = New clsCoordTransformation
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    Select Case Data
+                        Case "None"
+                            CoordServer.DatumTrans.Type = clsDatumTrans.enumType.None
+                        Case "Direct"
+                            CoordServer.DatumTrans.Type = clsDatumTrans.enumType.Direct
+                        Case "ViaWgs84"
+                            CoordServer.DatumTrans.Type = clsDatumTrans.enumType.ViaWgs84
+                        Case Else
+                            Message.AddWarning("Unknown datum transformation type: " & Data & vbCrLf)
+                    End Select
+
+                Case "SetDirectDatumTransCode"
+                    'If IsNothing(CoordServer) Then CoordServer = New clsCoordTransformation
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.DatumTrans.GetDirectDatumTransCoordOp(Data)
+
+                Case "SetDirectDatumTransApplyRev"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.DatumTrans.DirectMethodApplyReverse = Data
+
+                Case "SetInputToWgs84DatumTransCode"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.DatumTrans.GetInputToWgs84DatumTransCoordOp(Data)
+
+                Case "SetInputToWgs84DatumTransApplyRev"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.DatumTrans.InputToWgs84MethodApplyReverse = Data
+
+                Case "SetWgs84ToOutputDatumTransCode"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.DatumTrans.GetWgs84ToOutputDatumTransCoordOp(Data)
+
+                Case "SetoWgs84ToOutputDatumTransApplyRev"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.DatumTrans.Wgs84ToOutputMethodApplyReverse = Data
+
+               'Process instructions to set output formats: ------------------------------------------------------------
+                Case "SetDegMinSecDecimalPlaces"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.InputCrs.Coord.DegMinSecDecimalPlaces = Data
+                    CoordServer.OutputCrs.Coord.DegMinSecDecimalPlaces = Data
+
+                Case "ShowDmsSymbols"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    CoordServer.InputCrs.Coord.ShowDmsSymbols = Data
+                    CoordServer.OutputCrs.Coord.ShowDmsSymbols = Data
+
+
+               'Process instructions datum transformation information: ------------------------------------------------------------
+                Case "GetDatumTransInfo:Command"
+                    If IsNothing(CoordServer) Then StartCoordServer()
+                    Select Case Data
+                        Case "GetDirect7ParamDatumTransList"  'Get a list of Direct 7 parameter Datum Transformation operations.
+                            GetDirect7ParamDatumTransList()
+                        Case "GetInputToWgs84_7ParamDatumTransList"  'Get a list of Input to WGS 84 7 parameter Datum Transformation operations.
+                            GetInputToWgs84_7ParamDatumTransList()
+                        Case "GetWgs84ToOutput_7ParamDatumTransList"  'Get a list of WGS 84 to Output 7 parameter Datum Transformation operations.
+                            GetWgs84ToOutput_7ParamDatumTransList()
+                    End Select
+
+
+              'Process instructions: coordinate conversions: ------------------------------------------------------------
+                Case "Convert:Coord:Index"
+                    CoordIndex = Data
+                Case "Convert:Coord:SetEasting"
+                    CoordServer.InputCrs.Coord.SetEasting(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:SetNorthing"
+                    CoordServer.InputCrs.Coord.SetNorthing(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:SetLongitude"
+                    CoordServer.InputCrs.Coord.SetLongitude(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:SetLatitude"
+                    CoordServer.InputCrs.Coord.SetLatitude(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:SetEllHeight"
+                    CoordServer.InputCrs.Coord.SetEllipsoidalHeight(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:SetX"
+                    CoordServer.InputCrs.Coord.SetX(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:SetY"
+                    CoordServer.InputCrs.Coord.SetY(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:SetZ"
+                    CoordServer.InputCrs.Coord.SetZ(Data, Coordinate.UpdateMode.None)
+                Case "Convert:Coord:Command"
+                    Select Case Data
+                        Case "InputEastNorthToOutputLongLat"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.TransLongLat, Coordinate.CoordType.EastNorth)
+                            Dim Coord As New XElement("Coord")
+                            Dim Longitude As New XElement("Longitude", CoordServer.OutputCrs.Coord.Longitude)
+                            Coord.Add(Longitude)
+                            Dim Latitude As New XElement("Latitude", CoordServer.OutputCrs.Coord.Latitude)
+                            Coord.Add(Latitude)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        Case "InputEastNorthToOutputLongLatDms"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.TransLongLat, Coordinate.CoordType.EastNorth)
+                            Dim Coord As New XElement("Coord")
+                            Dim Longitude As New XElement("LongitudeDms", CoordServer.OutputCrs.Coord.LongitudeDMS)
+                            Coord.Add(Longitude)
+                            Dim Latitude As New XElement("LatitudeDms", CoordServer.OutputCrs.Coord.LatitudeDMS)
+                            Coord.Add(Latitude)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        'Case "GetLongLat"
+                        '    Dim Coord As New XElement("Coord")
+                        '    Dim Longitude As New XElement("Longitude", CoordServer.OutputCrs.Coord.Longitude)
+                        '    Coord.Add(Longitude)
+                        '    Dim Latitude As New XElement("Latitude", CoordServer.OutputCrs.Coord.Latitude)
+                        '    Coord.Add(Latitude)
+                        '    xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        'Case "GetLongLatDms"
+                        '    Dim Coord As New XElement("Coord")
+                        '    Dim Longitude As New XElement("Longitude", CoordServer.OutputCrs.Coord.LongitudeDMS)
+                        '    Coord.Add(Longitude)
+                        '    Dim Latitude As New XElement("Latitude", CoordServer.OutputCrs.Coord.LatitudeDMS)
+                        '    Coord.Add(Latitude)
+                        '    xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        Case "InputEastNorthToIndexedInputOutputAll"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.InputOutputAll, Coordinate.CoordType.EastNorth)
+                            Dim Coord As New XElement("Coord")
+                            Dim Index As New XElement("Index", CoordIndex)
+                            Coord.Add(Index)
+                            Dim InputLongitude As New XElement("InputLongitude", CoordServer.InputCrs.Coord.Longitude)
+                            Coord.Add(InputLongitude)
+                            Dim InputLatitude As New XElement("InputLatitude", CoordServer.InputCrs.Coord.Latitude)
+                            Coord.Add(InputLatitude)
+                            Dim InputEllHeight As New XElement("InputEllHeight", CoordServer.InputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(InputEllHeight)
+                            Dim InputX As New XElement("InputX", CoordServer.InputCrs.Coord.X)
+                            Coord.Add(InputX)
+                            Dim InputY As New XElement("InputY", CoordServer.InputCrs.Coord.Y)
+                            Coord.Add(InputY)
+                            Dim InputZ As New XElement("InputZ", CoordServer.InputCrs.Coord.Z)
+                            Coord.Add(InputZ)
+                            Dim OutputEasting As New XElement("OutputEasting", CoordServer.OutputCrs.Coord.Easting)
+                            Coord.Add(OutputEasting)
+                            Dim OutputNorthing As New XElement("OutputNorthing", CoordServer.OutputCrs.Coord.Northing)
+                            Coord.Add(OutputNorthing)
+                            Dim OutputLongitude As New XElement("OutputLongitude", CoordServer.OutputCrs.Coord.Longitude)
+                            Coord.Add(OutputLongitude)
+                            Dim OutputLatitude As New XElement("OutputLatitude", CoordServer.OutputCrs.Coord.Latitude)
+                            Coord.Add(OutputLatitude)
+                            Dim OutputEllHeight As New XElement("OutputEllHeight", CoordServer.OutputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(OutputEllHeight)
+                            Dim OutputX As New XElement("OutputX", CoordServer.OutputCrs.Coord.X)
+                            Coord.Add(OutputX)
+                            Dim OutputY As New XElement("OutputY", CoordServer.OutputCrs.Coord.Y)
+                            Coord.Add(OutputY)
+                            Dim OutputZ As New XElement("OutputZ", CoordServer.OutputCrs.Coord.Z)
+                            Coord.Add(OutputZ)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        Case "InputEastNorthToIndexedInputOutputAllDms"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.InputOutputAll, Coordinate.CoordType.EastNorth)
+                            Dim Coord As New XElement("Coord")
+                            Dim Index As New XElement("Index", CoordIndex)
+                            Coord.Add(Index)
+                            Dim InputLongitude As New XElement("InputLongitude", CoordServer.InputCrs.Coord.LongitudeDMS)
+                            Coord.Add(InputLongitude)
+                            Dim InputLatitude As New XElement("InputLatitude", CoordServer.InputCrs.Coord.LatitudeDMS)
+                            Coord.Add(InputLatitude)
+                            Dim InputEllHeight As New XElement("InputEllHeight", CoordServer.InputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(InputEllHeight)
+                            Dim InputX As New XElement("InputX", CoordServer.InputCrs.Coord.X)
+                            Coord.Add(InputX)
+                            Dim InputY As New XElement("InputY", CoordServer.InputCrs.Coord.Y)
+                            Coord.Add(InputY)
+                            Dim InputZ As New XElement("InputZ", CoordServer.InputCrs.Coord.Z)
+                            Coord.Add(InputZ)
+                            Dim OutputEasting As New XElement("OutputEasting", CoordServer.OutputCrs.Coord.Easting)
+                            Coord.Add(OutputEasting)
+                            Dim OutputNorthing As New XElement("OutputNorthing", CoordServer.OutputCrs.Coord.Northing)
+                            Coord.Add(OutputNorthing)
+                            Dim OutputLongitude As New XElement("OutputLongitudeDms", CoordServer.OutputCrs.Coord.LongitudeDMS)
+                            Coord.Add(OutputLongitude)
+                            Dim OutputLatitude As New XElement("OutputLatitudeDms", CoordServer.OutputCrs.Coord.LatitudeDMS)
+                            Coord.Add(OutputLatitude)
+                            Dim OutputEllHeight As New XElement("OutputEllHeight", CoordServer.OutputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(OutputEllHeight)
+                            Dim OutputX As New XElement("OutputX", CoordServer.OutputCrs.Coord.X)
+                            Coord.Add(OutputX)
+                            Dim OutputY As New XElement("OutputY", CoordServer.OutputCrs.Coord.Y)
+                            Coord.Add(OutputY)
+                            Dim OutputZ As New XElement("OutputZ", CoordServer.OutputCrs.Coord.Z)
+                            Coord.Add(OutputZ)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        Case "InputLongLatToIndexedInputOutputAll"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.InputOutputAll, Coordinate.CoordType.LongLat)
+                            Dim Coord As New XElement("Coord")
+                            Dim Index As New XElement("Index", CoordIndex)
+                            Coord.Add(Index)
+                            Dim InputEasting As New XElement("InputEasting", CoordServer.InputCrs.Coord.Easting)
+                            Coord.Add(InputEasting)
+                            Dim InputNorthing As New XElement("InputNorthing", CoordServer.InputCrs.Coord.Northing)
+                            Coord.Add(InputNorthing)
+                            Dim InputX As New XElement("InputX", CoordServer.InputCrs.Coord.X)
+                            Coord.Add(InputX)
+                            Dim InputY As New XElement("InputY", CoordServer.InputCrs.Coord.Y)
+                            Coord.Add(InputY)
+                            Dim InputZ As New XElement("InputZ", CoordServer.InputCrs.Coord.Z)
+                            Coord.Add(InputZ)
+                            Dim OutputEasting As New XElement("OutputEasting", CoordServer.OutputCrs.Coord.Easting)
+                            Coord.Add(OutputEasting)
+                            Dim OutputNorthing As New XElement("OutputNorthing", CoordServer.OutputCrs.Coord.Northing)
+                            Coord.Add(OutputNorthing)
+                            Dim OutputLongitude As New XElement("OutputLongitude", CoordServer.OutputCrs.Coord.Longitude)
+                            Coord.Add(OutputLongitude)
+                            Dim OutputLatitude As New XElement("OutputLatitude", CoordServer.OutputCrs.Coord.Latitude)
+                            Coord.Add(OutputLatitude)
+                            Dim OutputEllHeight As New XElement("OutputEllHeight", CoordServer.OutputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(OutputEllHeight)
+                            Dim OutputX As New XElement("OutputX", CoordServer.OutputCrs.Coord.X)
+                            Coord.Add(OutputX)
+                            Dim OutputY As New XElement("OutputY", CoordServer.OutputCrs.Coord.Y)
+                            Coord.Add(OutputY)
+                            Dim OutputZ As New XElement("OutputZ", CoordServer.OutputCrs.Coord.Z)
+                            Coord.Add(OutputZ)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        Case "InputLongLatToIndexedInputOutputAllDms"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.InputOutputAll, Coordinate.CoordType.LongLat)
+                            Dim Coord As New XElement("Coord")
+                            Dim Index As New XElement("Index", CoordIndex)
+                            Coord.Add(Index)
+                            Dim InputEasting As New XElement("InputEasting", CoordServer.InputCrs.Coord.Easting)
+                            Coord.Add(InputEasting)
+                            Dim InputNorthing As New XElement("InputNorthing", CoordServer.InputCrs.Coord.Northing)
+                            Coord.Add(InputNorthing)
+                            Dim InputX As New XElement("InputX", CoordServer.InputCrs.Coord.X)
+                            Coord.Add(InputX)
+                            Dim InputY As New XElement("InputY", CoordServer.InputCrs.Coord.Y)
+                            Coord.Add(InputY)
+                            Dim InputZ As New XElement("InputZ", CoordServer.InputCrs.Coord.Z)
+                            Coord.Add(InputZ)
+                            Dim OutputEasting As New XElement("OutputEasting", CoordServer.OutputCrs.Coord.Easting)
+                            Coord.Add(OutputEasting)
+                            Dim OutputNorthing As New XElement("OutputNorthing", CoordServer.OutputCrs.Coord.Northing)
+                            Coord.Add(OutputNorthing)
+                            Dim OutputLongitude As New XElement("OutputLongitudeDms", CoordServer.OutputCrs.Coord.LongitudeDMS)
+                            Coord.Add(OutputLongitude)
+                            Dim OutputLatitude As New XElement("OutputLatitudeDms", CoordServer.OutputCrs.Coord.LatitudeDMS)
+                            Coord.Add(OutputLatitude)
+                            Dim OutputEllHeight As New XElement("OutputEllHeight", CoordServer.OutputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(OutputEllHeight)
+                            Dim OutputX As New XElement("OutputX", CoordServer.OutputCrs.Coord.X)
+                            Coord.Add(OutputX)
+                            Dim OutputY As New XElement("OutputY", CoordServer.OutputCrs.Coord.Y)
+                            Coord.Add(OutputY)
+                            Dim OutputZ As New XElement("OutputZ", CoordServer.OutputCrs.Coord.Z)
+                            Coord.Add(OutputZ)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        Case "InputXYZToIndexedInputOutputAll"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.InputOutputAll, Coordinate.CoordType.XYZ)
+                            Dim Coord As New XElement("Coord")
+                            Dim Index As New XElement("Index", CoordIndex)
+                            Coord.Add(Index)
+                            Dim InputEasting As New XElement("InputEasting", CoordServer.InputCrs.Coord.Easting)
+                            Coord.Add(InputEasting)
+                            Dim InputNorthing As New XElement("InputNorthing", CoordServer.InputCrs.Coord.Northing)
+                            Coord.Add(InputNorthing)
+                            Dim InputLongitude As New XElement("InputLongitude", CoordServer.InputCrs.Coord.Longitude)
+                            Coord.Add(InputLongitude)
+                            Dim InputLatitude As New XElement("InputLatitude", CoordServer.InputCrs.Coord.Latitude)
+                            Coord.Add(InputLatitude)
+                            Dim InputEllHeight As New XElement("InputEllHeight", CoordServer.InputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(InputEllHeight)
+                            Dim OutputEasting As New XElement("OutputEasting", CoordServer.OutputCrs.Coord.Easting)
+                            Coord.Add(OutputEasting)
+                            Dim OutputNorthing As New XElement("OutputNorthing", CoordServer.OutputCrs.Coord.Northing)
+                            Coord.Add(OutputNorthing)
+                            Dim OutputLongitude As New XElement("OutputLongitude", CoordServer.OutputCrs.Coord.Longitude)
+                            Coord.Add(OutputLongitude)
+                            Dim OutputLatitude As New XElement("OutputLatitude", CoordServer.OutputCrs.Coord.Latitude)
+                            Coord.Add(OutputLatitude)
+                            Dim OutputEllHeight As New XElement("OutputEllHeight", CoordServer.OutputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(OutputEllHeight)
+                            Dim OutputX As New XElement("OutputX", CoordServer.OutputCrs.Coord.X)
+                            Coord.Add(OutputX)
+                            Dim OutputY As New XElement("OutputY", CoordServer.OutputCrs.Coord.Y)
+                            Coord.Add(OutputY)
+                            Dim OutputZ As New XElement("OutputZ", CoordServer.OutputCrs.Coord.Z)
+                            Coord.Add(OutputZ)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                        Case "InputXYZToIndexedInputOutputAllDms"
+                            CoordServer.InputCrs_Update(Coordinate.UpdateMode.InputOutputAll, Coordinate.CoordType.XYZ)
+                            Dim Coord As New XElement("Coord")
+                            Dim Index As New XElement("Index", CoordIndex)
+                            Coord.Add(Index)
+                            Dim InputEasting As New XElement("InputEasting", CoordServer.InputCrs.Coord.Easting)
+                            Coord.Add(InputEasting)
+                            Dim InputNorthing As New XElement("InputNorthing", CoordServer.InputCrs.Coord.Northing)
+                            Coord.Add(InputNorthing)
+                            Dim InputLongitude As New XElement("InputLongitude", CoordServer.InputCrs.Coord.LongitudeDMS)
+                            Coord.Add(InputLongitude)
+                            Dim InputLatitude As New XElement("InputLatitude", CoordServer.InputCrs.Coord.LatitudeDMS)
+                            Coord.Add(InputLatitude)
+                            Dim InputEllHeight As New XElement("InputEllHeight", CoordServer.InputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(InputEllHeight)
+                            Dim OutputEasting As New XElement("OutputEasting", CoordServer.OutputCrs.Coord.Easting)
+                            Coord.Add(OutputEasting)
+                            Dim OutputNorthing As New XElement("OutputNorthing", CoordServer.OutputCrs.Coord.Northing)
+                            Coord.Add(OutputNorthing)
+                            Dim OutputLongitude As New XElement("OutputLongitudeDms", CoordServer.OutputCrs.Coord.LongitudeDMS)
+                            Coord.Add(OutputLongitude)
+                            Dim OutputLatitude As New XElement("OutputLatitudeDms", CoordServer.OutputCrs.Coord.LatitudeDMS)
+                            Coord.Add(OutputLatitude)
+                            Dim OutputEllHeight As New XElement("OutputEllHeight", CoordServer.OutputCrs.Coord.EllipsoidalHeight)
+                            Coord.Add(OutputEllHeight)
+                            Dim OutputX As New XElement("OutputX", CoordServer.OutputCrs.Coord.X)
+                            Coord.Add(OutputX)
+                            Dim OutputY As New XElement("OutputY", CoordServer.OutputCrs.Coord.Y)
+                            Coord.Add(OutputY)
+                            Dim OutputZ As New XElement("OutputZ", CoordServer.OutputCrs.Coord.Z)
+                            Coord.Add(OutputZ)
+                            xlocns(xlocns.Count - 1).Add(Coord) 'Add the calculated Longitude and Latitude to the reply message
+                    End Select
+
+
+               'Process instructions used to control the Coordinate Server: ------------------------------------------------------------
+
+
+
 
 
             'Startup Command Arguments ================================================
@@ -4228,16 +5857,6 @@ Public Class Main
                         ApplicationInfo.SettingsLocn = Project.SettingsLocn
                         Message.SettingsLocn = Project.SettingsLocn 'Set up the Message object
                         Message.Show() 'Added 18May19
-
-                        'txtTotalDuration.Text = Project.Usage.TotalDuration.Days.ToString.PadLeft(5, "0"c) & ":" &
-                        '              Project.Usage.TotalDuration.Hours.ToString.PadLeft(2, "0"c) & ":" &
-                        '              Project.Usage.TotalDuration.Minutes.ToString.PadLeft(2, "0"c) & ":" &
-                        '              Project.Usage.TotalDuration.Seconds.ToString.PadLeft(2, "0"c)
-
-                        'txtCurrentDuration.Text = Project.Usage.CurrentDuration.Days.ToString.PadLeft(5, "0"c) & ":" &
-                        '               Project.Usage.CurrentDuration.Hours.ToString.PadLeft(2, "0"c) & ":" &
-                        '               Project.Usage.CurrentDuration.Minutes.ToString.PadLeft(2, "0"c) & ":" &
-                        '               Project.Usage.CurrentDuration.Seconds.ToString.PadLeft(2, "0"c)
 
                         txtTotalDuration.Text = Project.Usage.TotalDuration.Days.ToString.PadLeft(5, "0"c) & "d:" &
                                         Project.Usage.TotalDuration.Hours.ToString.PadLeft(2, "0"c) & "h:" &
@@ -4709,7 +6328,10 @@ Public Class Main
         txtAngleSeconds.Text = ""
     End Sub
 
-
+    Private Sub Timer4_Tick(sender As Object, e As EventArgs) Handles Timer4.Tick
+        'Exit the application:
+        Me.btnExit.PerformClick() 'Press the Exit button
+    End Sub
 
 
 #End Region 'Form Methods ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -4735,7 +6357,40 @@ Public Class Main
         Public Locn As String 'The location to send the information.
     End Class
 
+    Private Class clsGetCRSListInfo
+        'Settings used to get a list of geographic coordinate reference systems.
 
+        'Geographic bounding area properties:
+        Property NorthLat As Single 'The northern WGS 84 latitude of the selection bounding area.
+        Property SouthLat As Single 'The southern WGS 84 latitude of the selection bounding area.
+        Property WestLong As Single 'The western WGS 84 longitude of the selection bounding area.
+        Property EastLong As Single 'The eastern WGS 84 longitude of the selection bounding area.
+
+        'Geographic reference point properties:
+        Property ReferenceLongitude As Single 'The WGS 84 Longitude of the geographic reference point.
+        Property ReferenceLatitude As Single 'The WGS 84 Latitude of the geographic reference point.
+
+        Enum SelectMethods
+            All
+            ExtendingIntoArea
+            InsideArea
+            ContainingPoint
+        End Enum
+        Property SelectMethod As SelectMethods 'The area selection method: All - select all CRSs, ExtendingInto - select CRSs extending into the area, Inside - select CRSs inside the area.
+
+        Property GetProjected As Boolean 'If true, Projected CRSs are selected.
+        Property GetGeographic2D As Boolean 'If true, Geographic 2D CRSs are selected.
+        Property GetGeographic3D As Boolean 'If true, Geographic 3D CRSs are selected.
+        Property GetCompound As Boolean 'If true, Compound CRSs are selected.
+        Property GetDerived As Boolean 'If true, Derived CRSs are selected.
+        Property GetEngineering As Boolean 'If true, Engineering CRSs are selected.
+        Property GetGeocentric As Boolean 'If true, Geocentric CRSs are selected.
+        Property GetVertical As Boolean 'If true, Vertical CRSs are selected.
+
+        Property UseCrsNameContains As Boolean 'If True, only CRS names containing the CrsNameContains string will be selected.
+        Property CrsNameContains As String 'If not blank, only CRS names containing this string will be selected.
+
+    End Class 'clsGetGeoCRSListInfo
 
 
 

@@ -562,7 +562,7 @@ Public Class clsCoordTransformation
         End If
     End Sub
 
-    Private Sub InputCrs_Update(Mode As Coordinate.UpdateMode, From As Coordinate.CoordType) Handles InputCrs.Update
+    Public Sub InputCrs_Update(Mode As Coordinate.UpdateMode, From As Coordinate.CoordType) Handles InputCrs.Update
         'Update coordinates from the specified coordinate type.
         'A coordinate in the Input Coordinate Reference System has been updated.
         'Update the coordinates specified by Mode using the coordinate specified by From.
@@ -748,7 +748,7 @@ Public Class clsCoordTransformation
         End Select
     End Sub
 
-    Private Sub OutputCrs_Update(Mode As Coordinate.UpdateMode, From As Coordinate.CoordType) Handles OutputCrs.Update
+    Public Sub OutputCrs_Update(Mode As Coordinate.UpdateMode, From As Coordinate.CoordType) Handles OutputCrs.Update
         'Update coordinates from the specified coordinate type.
         'A coordinate in the Output Coordinate Reference System has been updated.
         'Update the coordinates specified by Mode using the coordinate specified by From.

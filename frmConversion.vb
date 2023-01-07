@@ -73,6 +73,17 @@ Public Class frmConversion
         End Set
     End Property
 
+
+
+    Public Sub New()
+
+        ' This call is required by the designer.
+        InitializeComponent()
+
+        ' Add any initialization after the InitializeComponent() call.
+
+    End Sub
+
     Private _modified As Boolean = False 'If True, the conversion settings have been modified.
     Property Modified As Boolean
         Get
@@ -228,9 +239,9 @@ Public Class frmConversion
                                <DirectCoordOpCode><%= Conversion.DatumTrans.DirectCoordOp.Code %></DirectCoordOpCode>
                                <InputToWgs84CoordOpCode><%= Conversion.DatumTrans.InputToWgs84CoordOp.Code %></InputToWgs84CoordOpCode>
                                <Wgs84ToOutputCoordOpCode><%= Conversion.DatumTrans.Wgs84ToOutputCoordOp.Code %></Wgs84ToOutputCoordOpCode>
-                               <!--  Coordinate Type Conversion Settings-->
-                               <DatumTransType><%= Conversion.DatumTrans.Type %></DatumTransType>
                                <!--  Datum Transformation Settings-->
+                               <DatumTransType><%= Conversion.DatumTrans.Type %></DatumTransType>
+                               <!--  Point Conversion Settings-->
                                <EntryCoordType><%= EntryCoordType %></EntryCoordType>
                                <ShowInputEastingNorthing><%= chkShowInputEastNorth.Checked %></ShowInputEastingNorthing>
                                <ShowInputLongitudeLatitude><%= chkShowInputLongLat.Checked %></ShowInputLongitudeLatitude>
@@ -737,7 +748,8 @@ Public Class frmConversion
                 End If
 
             End If
-            ApplyDatumTransFormats()
+            'ApplyDatumTransFormats()
+            ApplyCoordinateFormats()
 
             CheckFormPos()
         End If
@@ -1058,7 +1070,8 @@ Public Class frmConversion
 
         RestoreFormSettings()   'Restore the form settings
 
-        UpdateDatumTransTable()
+        'UpdateDatumTransTable()
+        UpdateConversionTable()
 
 
 
@@ -1311,7 +1324,8 @@ Public Class frmConversion
         If txtInputCrsQuery.Text.Trim = "" Then txtInputCrsQuery.Text = "Select COORD_REF_SYS_CODE, COORD_REF_SYS_NAME, COORD_REF_SYS_KIND, REMARKS From [Coordinate Reference System]"
         If txtOutputCrsQuery.Text.Trim = "" Then txtOutputCrsQuery.Text = "Select COORD_REF_SYS_CODE, COORD_REF_SYS_NAME, COORD_REF_SYS_KIND, REMARKS From [Coordinate Reference System]"
 
-        ReCalcDatumTransTable()
+        'ReCalcDatumTransTable()
+        ReCalcConversionTable()
 
         FindDefaultDatumTrans()
 
@@ -2430,7 +2444,6 @@ Public Class frmConversion
             DisplayDirectTransformationOptions()
             DisplayInputToWgs84TransOptions()
             DisplayWgs84ToOutputTransOptions()
-
         Else
 
         End If
@@ -3771,8 +3784,6 @@ Public Class frmConversion
 
     Private Sub dgvConversion_CellContentClick(sender As Object, e As DataGridViewCellEventArgs) Handles dgvConversion.CellContentClick
 
-
-
     End Sub
 
     Private Sub dgvConversion_CellClick(sender As Object, e As DataGridViewCellEventArgs) Handles dgvConversion.CellClick
@@ -3797,12 +3808,10 @@ Public Class frmConversion
                     Conversion.Angle.SetAngle(dgvConversion.Rows(e.RowIndex).Cells(e.ColumnIndex).Value)
                     Conversion.Angle.DecDegreeDecPlaces = txtDegreeDecPlaces.Text
                     Conversion.Angle.SecondsDecPlaces = txtSecondsDecPlaces.Text
-                    'txtDecDegree.Text = Conversion.Angle.DecimalDegrees
                     txtDecDegree.Text = Conversion.Angle.FormattedDecimalDegrees
                     If Conversion.Angle.Sign = clsAngle.AngleSign.Negative Then txtAngleSign.Text = "-" Else txtAngleSign.Text = "+"
                     txtAngleDegrees.Text = Conversion.Angle.Degrees
                     txtAngleMinutes.Text = Conversion.Angle.Minutes
-                    'txtAngleSeconds.Text = Conversion.Angle.Seconds
                     txtAngleSeconds.Text = Conversion.Angle.FormattedSeconds
                 Case "Input Latitude"
                     Conversion.Angle.SetAngle(dgvConversion.Rows(e.RowIndex).Cells(e.ColumnIndex).Value)
@@ -3835,21 +3844,17 @@ Public Class frmConversion
 
                 Case "Output Longitude"
                     Conversion.Angle.SetAngle(dgvConversion.Rows(e.RowIndex).Cells(e.ColumnIndex).Value)
-                    'txtDecDegree.Text = Conversion.Angle.DecimalDegrees
                     txtDecDegree.Text = Conversion.Angle.FormattedDecimalDegrees
                     If Conversion.Angle.Sign = clsAngle.AngleSign.Negative Then txtAngleSign.Text = "-" Else txtAngleSign.Text = "+"
                     txtAngleDegrees.Text = Conversion.Angle.Degrees
                     txtAngleMinutes.Text = Conversion.Angle.Minutes
-                    'txtAngleSeconds.Text = Conversion.Angle.Seconds
                     txtAngleSeconds.Text = Conversion.Angle.FormattedSeconds
                 Case "Output Latitude"
                     Conversion.Angle.SetAngle(dgvConversion.Rows(e.RowIndex).Cells(e.ColumnIndex).Value)
-                    'txtDecDegree.Text = Conversion.Angle.DecimalDegrees
                     txtDecDegree.Text = Conversion.Angle.FormattedDecimalDegrees
                     If Conversion.Angle.Sign = clsAngle.AngleSign.Negative Then txtAngleSign.Text = "-" Else txtAngleSign.Text = "+"
                     txtAngleDegrees.Text = Conversion.Angle.Degrees
                     txtAngleMinutes.Text = Conversion.Angle.Minutes
-                    'txtAngleSeconds.Text = Conversion.Angle.Seconds
                     txtAngleSeconds.Text = Conversion.Angle.FormattedSeconds
                 Case "Output Ellipsoidal Height"
 
@@ -4016,18 +4021,10 @@ Public Class frmConversion
         'The Projected Easting and Northing format has changed.
 
         Dim Format As String = txtProjFormat.Text.Trim
-        'For Each Col As DataGridViewColumn In dgvConversion.Columns
-        '    If Col.HeaderText = "Input Easting" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.Visible And Col.HeaderText = "Input Easting" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.Visible And Col.HeaderText = "Input Northing" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.Visible And Col.Visible And Col.HeaderText = "Output Easting" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.Visible And Col.HeaderText = "Output Northing" Then Col.DefaultCellStyle.Format = Format
-        'Next
         dgvConversion.Columns(3).DefaultCellStyle.Format = Format
         dgvConversion.Columns(4).DefaultCellStyle.Format = Format
         dgvConversion.Columns(20).DefaultCellStyle.Format = Format
         dgvConversion.Columns(21).DefaultCellStyle.Format = Format
-
     End Sub
 
     Private Sub txtDegreeDecPlaces_TextChanged(sender As Object, e As EventArgs) Handles txtDegreeDecPlaces.TextChanged
@@ -4074,14 +4071,6 @@ Public Class frmConversion
     Private Sub txtCartFormat_LostFocus(sender As Object, e As EventArgs) Handles txtCartFormat.LostFocus
         'The Cartesian coordinate format has changed.
         Dim Format As String = txtCartFormat.Text.Trim
-        'For Each Col As DataGridViewColumn In dgvConversion.Columns
-        '    If Col.HeaderText = "Input X" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.HeaderText = "Input Y" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.HeaderText = "Input Z" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.HeaderText = "Output X" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.HeaderText = "Output Y" Then Col.DefaultCellStyle.Format = Format
-        '    If Col.HeaderText = "Output Z" Then Col.DefaultCellStyle.Format = Format
-        'Next
         dgvConversion.Columns(8).DefaultCellStyle.Format = Format
         dgvConversion.Columns(9).DefaultCellStyle.Format = Format
         dgvConversion.Columns(10).DefaultCellStyle.Format = Format
@@ -4109,8 +4098,9 @@ Public Class frmConversion
         dgvConversion.Columns(19).DefaultCellStyle.Format = Format
     End Sub
 
-    Private Sub ApplyDatumTransFormats()
-        'Apply the Dataum Transformation number formats to dgvConversion
+    'Private Sub ApplyDatumTransFormats()
+    Private Sub ApplyCoordinateFormats()
+        'Apply the Datum Transformation number formats to dgvConversion
 
         Dim ProjFormat As String = txtProjFormat.Text.Trim
         Dim CartFormat As String = txtCartFormat.Text.Trim
@@ -5539,9 +5529,12 @@ Public Class frmConversion
             End If
 
         End If
-        ApplyDatumTransFormats()
 
-        UpdateDatumTransTable()
+        'ApplyDatumTransFormats()
+        ApplyCoordinateFormats()
+
+        'UpdateDatumTransTable()
+        UpdateConversionTable()
 
         ShowInputCrsInfo()
         ShowOutputCrsInfo()
@@ -5560,7 +5553,8 @@ Public Class frmConversion
         If txtInputCrsQuery.Text.Trim = "" Then txtInputCrsQuery.Text = "Select COORD_REF_SYS_CODE, COORD_REF_SYS_NAME, COORD_REF_SYS_KIND, REMARKS From [Coordinate Reference System]"
         If txtOutputCrsQuery.Text.Trim = "" Then txtOutputCrsQuery.Text = "Select COORD_REF_SYS_CODE, COORD_REF_SYS_NAME, COORD_REF_SYS_KIND, REMARKS From [Coordinate Reference System]"
 
-        ReCalcDatumTransTable()
+        'ReCalcDatumTransTable()
+        ReCalcConversionTable()
 
         FindDefaultDatumTrans()
 
@@ -5753,7 +5747,8 @@ Public Class frmConversion
     End Sub
 
 
-    Private Sub UpdateDatumTransTable()
+    'Private Sub UpdateDatumTransTable()
+    Private Sub UpdateConversionTable()
 
         If chkShowPointNumber.Checked Then dgvConversion.Columns(0).Visible = True Else dgvConversion.Columns(0).Visible = False
         If chkShowPointName.Checked Then dgvConversion.Columns(1).Visible = True Else dgvConversion.Columns(1).Visible = False
@@ -5930,7 +5925,8 @@ Public Class frmConversion
 
     End Sub
 
-    Private Sub ReCalcDatumTransTable()
+    'Private Sub ReCalcDatumTransTable()
+    Private Sub ReCalcConversionTable()
         'Recalculate location values in the Datum Transformation table.
 
         dgvConversion.AllowUserToAddRows = False
